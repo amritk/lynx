@@ -12,16 +12,18 @@ namespace lynx {
 namespace embedder {
 
 // A reusable, open-source HTTP service backed by each platform's native system
-// networking library (WinHTTP on Windows, NSURLSession on macOS/iOS). It is a
-// shared embedder library so that any desktop embedder app can enable JS
-// fetch() by registering it, rather than each app reimplementing the transport.
+// networking library (WinHTTP on Windows, NSURLSession on macOS/iOS) or, on
+// Linux, by the vendored cpp-httplib. It is a shared embedder library so that
+// any desktop embedder app can enable JS fetch() by registering it, rather
+// than each app reimplementing the transport.
 //
 // Register it once at startup:
 //   lynx::pub::LynxServiceCenter::GetInstance().RegisterService(
 //       std::make_shared<lynx::embedder::LynxHttpServiceImpl>());
 //
 // The per-platform transport lives in the platform-specific translation units
-// (lynx_http_service_impl_win.cc, lynx_http_service_impl_darwin.mm).
+// (lynx_http_service_impl_win.cc, lynx_http_service_impl_darwin.mm,
+// lynx_http_service_impl_linux.cc).
 class LynxHttpServiceImpl : public pub::LynxHttpService {
  public:
   LynxHttpServiceImpl() = default;

@@ -2,6 +2,8 @@
 # Licensed under the Apache License Version 2.0 that can be found in the
 # LICENSE file in the root directory of this source tree.
 
+import("../config.gni")
+
 group("explorer") {
   deps = []
   if (is_mac) {
@@ -9,5 +11,15 @@ group("explorer") {
   }
   if (is_win) {
     deps += [ "windows/lynx_explorer" ]
+  }
+
+  # The Linux explorer hosts Lynx through the windowless renderer, whose entry
+  # points only exist when is_headless is set, so it cannot be built without
+  # it and says so with an assert. Depending on it unconditionally made that
+  # assert abort `gn gen` for every non-headless Linux configuration, whether
+  # or not anyone wanted the explorer. Naming the target directly still gets
+  # the assert and its explanation.
+  if (is_linux && is_headless) {
+    deps += [ "linux/lynx_explorer" ]
   }
 }

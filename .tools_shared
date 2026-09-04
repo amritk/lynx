@@ -41,6 +41,7 @@ checker-config:
       - '^explorer/darwin/ios/Lynx_explorer/LynxExplorer/Resource/'
       - '^clay/testing/*'
       - '^clay/third_party/txt/*'
+      - '^explorer/linux/lynx_explorer/wayland/protocols/*'
 
   cpplint-checker:
     ignore-suffixes:
@@ -59,6 +60,7 @@ checker-config:
       - '^explorer/darwin/ios/Lynx_explorer/LynxExplorer/Resource/'
       - '^clay/testing/*'
       - '^clay/third_party/txt/*'
+      - '^explorer/linux/lynx_explorer/wayland/protocols/*'
 
   api-checker:
     api-check-bin: 'tools/api/main.py'
