@@ -53,7 +53,8 @@ export default function SettingsPage(props: SettingsPageProps) {
   } as const;
 
   const openDevtoolSwitchPage = () => {
-    const isDesktop = platform === 'macos' || platform === 'windows';
+    const isDesktop =
+      platform === 'macos' || platform === 'windows' || platform === 'linux';
     navigateTo(
       'switchPage/devtoolSwitch.lynx.bundle',
       isDesktop ? DESKTOP_DEVTOOL_SWITCH_PARAMS : undefined

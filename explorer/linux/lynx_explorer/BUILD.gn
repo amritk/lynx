@@ -1,0 +1,217 @@
+# Copyright 2026 The Lynx Authors. All rights reserved.
+# Licensed under the Apache License Version 2.0 that can be found in the
+# LICENSE file in the root directory of this source tree.
+
+import("../../../core/Lynx.gni")
+
+# The explorer drives Lynx through the windowless renderer, whose C entry
+# points are only compiled into platform/embedder when is_headless is set.
+# Without this the configuration generates cleanly and then dies in undefined
+# symbols at the very end of a multi-hour build.
+assert(is_headless,
+       "explorer/linux requires is_headless=true: it hosts Lynx through the " +
+           "windowless renderer rather than letting clay own a window.")
+
+# A Wayland listener with a zero-initialized slot is not a style question:
+# libwayland calls wl_abort() when an event arrives for a NULL entry. Keeping
+# this warning on means a protocol header that gains an event fails the build
+# instead of the client.
+config("listener_warnings") {
+  cflags = [ "-Wmissing-field-initializers" ]
+}
+
+executable("lynx_explorer") {
+  output_name = "lynx_explorer/lynx_explorer"
+
+  sources = [
+    "fetcher/example_generic_resource_fetcher.cc",
+    "fetcher/example_generic_resource_fetcher.h",
+    "httplib/httplib_client.cc",
+    "httplib/httplib_client.h",
+    "lynx_window.cc",
+    "lynx_window.h",
+    "main.cc",
+    "module/explorer_module.cc",
+    "module/explorer_module.h",
+    "module/explorer_module_host.cc",
+    "module/explorer_module_host.h",
+    "wayland/key_mapping.cc",
+    "wayland/key_mapping.h",
+    "wayland/protocols/xdg-decoration-client-protocol.h",
+    "wayland/protocols/xdg-decoration-protocol.c",
+    "wayland/protocols/xdg-shell-client-protocol.h",
+    "wayland/protocols/xdg-shell-protocol.c",
+    "wayland/wayland_app.cc",
+    "wayland/wayland_app.h",
+    "wayland/wayland_clipboard.cc",
+    "wayland/wayland_clipboard.h",
+    "wayland/wayland_input.cc",
+    "wayland/wayland_input.h",
+    "wayland/wayland_window.cc",
+    "wayland/wayland_window.h",
+    "wayland_lynx_renderer.cc",
+    "wayland_lynx_renderer.h",
+  ]
+  include_dirs = [
+    ".",
+    "wayland/protocols",
+  ]
+
+  # ExplorerModule is a NAPI module, and liblynx.so exports the NAPI entry
+  # points under their weak suffix (napi_create_function_weak and friends)
+  # whenever use_weak_suffix_napi is on -- the default. Without this define
+  # the headers declare the unsuffixed names, which nothing defines, and the
+  # link fails. The Windows and macOS explorers carry the same define.
+  if (use_weak_suffix_napi) {
+    defines = [ "USE_WEAK_SUFFIX_NAPI=1" ]
+  }
+
+  # Re-enabled through a config rather than target cflags: GN emits target
+  # cflags BEFORE config cflags, so the repository's global
+  # -Wno-missing-field-initializers would come later and win.
+  configs += [ ":listener_warnings" ]
+
+  libs = [
+    "EGL",
+
+    # dlsym() is used to resolve GL entry points; on glibc < 2.34 that needs
+    # an explicit -ldl. pthread is deliberately absent: the toolchain already
+    # passes -pthread, and nothing here calls the pthread API directly.
+    "dl",
+    "wayland-client",
+    "wayland-cursor",
+    "wayland-egl",
+    "xkbcommon",
+  ]
+
+  # liblynx.so lives in the build root, one directory above the executable.
+  ldflags = [
+    "-Wl,-rpath,\$ORIGIN",
+    "-Wl,-rpath,\$ORIGIN/..",
+
+    # This executable and liblynx.so each contain a copy of cpp-httplib and
+    # BoringSSL, and the build does not hide visibility. Keep this
+    # executable's copies out of its dynamic symbol table so they cannot
+    # interpose the library's own calls and split BoringSSL's internal state
+    # across the two. (--exclude-libs does not help here: these arrive as
+    # loose object files from source_sets, not as static archives.)
+    "-Wl,--version-script=" +
+        rebase_path("localize_symbols.map", root_build_dir),
+  ]
+
+  # ldflags alone does not make the version script a dependency of the link,
+  # so editing it would leave the previous symbol filtering in place with no
+  # rebuild and no warning. GN attaches inputs to every compile edge rather
+  # than to the link alone, so touching it rebuilds this target's objects
+  # too; that is the cost of the edge existing at all, and the file changes
+  # about never.
+  inputs = [ "localize_symbols.map" ]
+
+  deps = [
+    ":build_card_resources",
+    ":copy_icu",
+    ":copy_liblynx",
+    ":copy_resources",
+    "../../../platform/embedder:public_headers",
+    "../../../platform/embedder/http_service:http_service",
+    "../../../platform/linux:linux",
+
+    # httplib is used by lynx_explorer to download resources.
+    "//third_party/httplib",
+  ]
+}
+
+# Builds the homepage card shown when the explorer is started without a
+# bundle argument, and stages it under lynx_explorer/resources/homepage.
+action("build_card_resources") {
+  script = "build_resources.py"
+
+  # Enough of both cards' sources that their entry points and configuration
+  # trigger a rebuild. This is deliberately not exhaustive: components/ and
+  # assets/ are not listed, so editing those alone still ships a stale bundle.
+  # Matching the macOS explorer, which has the same gap.
+  inputs = [
+    "../../homepage/build.py",
+    "../../homepage/index.tsx",
+    "../../homepage/lynx.config.mjs",
+    "../../homepage/package.json",
+
+    # The showcase half. Without these, editing the showcase restages
+    # nothing and the build ships the previous bundles, while editing the
+    # homepage pays for a showcase rebuild it does not need.
+    "../../showcase/package.json",
+    "../../showcase/menu/index.tsx",
+    "../../showcase/menu/lynx.config.mjs",
+    "../../showcase/menu/package.json",
+
+    # The other six rspeedy entries declared by that lynx.config.mjs. The
+    # bundles they produce are already listed as outputs, but with no depfile
+    # and no restat -- and with pnpm invoked by the script, so its own caching
+    # never gets the chance to notice -- editing one of these without listing
+    # it here rebuilds nothing and stages the previous bundle.
+    "../../showcase/menu/sub-menu/animation.tsx",
+    "../../showcase/menu/sub-menu/css.tsx",
+    "../../showcase/menu/sub-menu/layout.tsx",
+    "../../showcase/menu/sub-menu/list.tsx",
+    "../../showcase/menu/sub-menu/scrollview.tsx",
+    "../../showcase/menu/sub-menu/text.tsx",
+
+    # Staging is checked against this, so a change to it has to re-run.
+    "showcase_bundles.txt",
+  ]
+
+  # The staged bundles are the real product; declaring only a stamp meant a
+  # deleted or stale bundle was never regenerated, and the explorer then
+  # started with no content. That applies to every staged file, not just the
+  # first one: an undeclared output is invisible to ninja, so losing it is
+  # neither detected nor repaired, and `ninja -t clean` leaves it behind.
+  #
+  # The showcase set comes from a checked-in manifest rather than from
+  # enumerating the workspace at gen time. Enumeration cannot work here: the
+  # bundles live under explorer/showcase/node_modules, which is gitignored, so
+  # on a fresh clone a `gn gen` run before `pnpm install` would find nothing,
+  # declare only a handful of outputs and -- because nothing it read had
+  # changed -- never re-run to correct itself. The manifest is always present,
+  # so the outputs are always declared. build_resources.py compares what it
+  # actually staged against it and fails if the two have drifted, naming the
+  # difference, so a showcase change cannot silently go untracked.
+  stamp = "$target_gen_dir/build_card_resources.stamp"
+  showcase_bundles = read_file("showcase_bundles.txt", "list lines")
+  outputs =
+      [ "$root_build_dir/lynx_explorer/resources/homepage/main.lynx.bundle" ]
+  foreach(bundle, showcase_bundles) {
+    outputs += [ "$root_build_dir/lynx_explorer/resources/showcase/$bundle" ]
+  }
+  outputs += [ stamp ]
+
+  # root_build_dir, not root_out_dir: the outputs above are declared under
+  # root_build_dir, and the two differ outside the default toolchain -- the
+  # script would then stage into a directory ninja is not watching.
+  args = [
+    rebase_path(root_build_dir, root_build_dir),
+    rebase_path("//", root_build_dir),
+    rebase_path(stamp, root_build_dir),
+  ]
+}
+
+copy("copy_resources") {
+  sources = [
+    "$root_build_dir/lynx_core/lynx_core.js",
+    "$root_build_dir/lynx_core/lynx_core_dev.js",
+  ]
+  outputs = [ "$root_build_dir/lynx_explorer/{{source_file_part}}" ]
+  deps = [ "../../../platform/linux:lynx_core" ]
+}
+
+# Stage the engine next to the executable so lynx_explorer/ is self-contained
+# and can be copied elsewhere, as the Windows explorer does with lynx.dll.
+copy("copy_liblynx") {
+  sources = [ "$root_build_dir/liblynx.so" ]
+  outputs = [ "$root_build_dir/lynx_explorer/{{source_file_part}}" ]
+  public_deps = [ "../../../platform/linux:linux" ]
+}
+
+copy("copy_icu") {
+  sources = [ "//third_party/icu/flutter/icudtl.dat" ]
+  outputs = [ "$root_build_dir/lynx_explorer/data/{{source_file_part}}" ]
+}

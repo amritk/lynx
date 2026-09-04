@@ -1,0 +1,83 @@
+From fd045e408e6b65e8748ca6f1f7601e70980d3be7 Mon Sep 17 00:00:00 2001
+From: Lynx Authors <noreply@lynxjs.org>
+Date: Tue, 25 Aug 2026 22:13:50 +0000
+Subject: [PATCH] [BugFix] Fix Linux DNS resolution and 304 handling
+
+Two independent defects, both found while bringing up a Linux desktop
+host.
+
+1. DNS resolution fails intermittently under concurrency (glibc only).
+
+On glibc, a non-zero connection timeout selects the getaddrinfo_a path.
+gai_suspend() returns EAI_ALLDONE when the lookup completed before the
+wait began, which happens routinely once a resolver thread is warm and
+constantly when requests overlap. That return was treated as a failure,
+discarding an address that had already resolved successfully and leaking
+its addrinfo, so requests failed with 'Could not establish connection'
+without a syscall ever reaching the network.
+
+Measured against a local server, same machine, before and after:
+
+  concurrency  1    2      4      8      16
+  before       0%   5.0%   7.5%   6.7%   -
+  after        0%   0%     0%     0%     0%
+
+This branch is inside '#elif defined(_GNU_SOURCE) && defined(__GLIBC__)',
+so no other platform is affected.
+
+2. 304 Not Modified is followed as a redirect.
+
+304 is in the 3xx range but is not a redirect and carries no Location, so
+redirect() failed and the caller saw an opaque transport error instead of
+the response:
+
+  before:  error=Unknown  status=-1
+  after:   error=Success  status=304
+
+This one is not platform-scoped, so it is worth being explicit about why
+it is safe. The library was already internally inconsistent: the
+equivalent test in process_request() excludes 304 when deciding whether a
+response is a redirect, while the test in send_() did not. This change
+makes the two agree with each other. Nothing can depend on the previous
+behaviour, because the previous behaviour produced no status, no headers
+and no body -- only Error::Unknown.
+---
+ httplib.cc | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/httplib.cc b/httplib.cc
+index b78bb4f..d8d0bf9 100644
+--- a/httplib.cc
++++ b/httplib.cc
+@@ -1676,6 +1676,16 @@ int getaddrinfo_with_timeout(const char *node, const char *service,
+       if (request.ar_result) { freeaddrinfo(request.ar_result); }
+       return gai_result;
+     }
++  } else if (wait_result == EAI_ALLDONE) {
++    // The lookup completed before gai_suspend() began waiting. That is a
++    // success, not a failure: treat it exactly like wait_result == 0.
++    int gai_result = gai_error(&request);
++    if (gai_result == 0) {
++      *res = request.ar_result;
++      return 0;
++    }
++    if (request.ar_result) { freeaddrinfo(request.ar_result); }
++    return gai_result;
+   } else if (wait_result == EAI_AGAIN) {
+     // Timeout occurred, cancel the request
+     gai_cancel(&request);
+@@ -4768,7 +4778,10 @@ bool ClientImpl::handle_request(Stream &strm, Request &req,
+     close_socket(socket_);
+   }
+ 
+-  if (300 < res.status && res.status < 400 && follow_location_) {
++  // 304 is in the 3xx range but is not a redirect and carries no Location,
++  // so following it turns a valid conditional response into an error.
++  if (300 < res.status && res.status < 400 &&
++      res.status != StatusCode::NotModified_304 && follow_location_) {
+     req = req_save;
+     ret = redirect(req, res, error);
+   }
+-- 
+2.43.0
+

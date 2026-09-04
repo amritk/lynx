@@ -151,3 +151,9 @@ js_libraries/lynx-core/src/common/feature.ts
 /tools/api/android
 /tools/api/ios
 /tools/api/docs/gen
+
+# Unit test byproducts, written into the working directory by the test
+# executables and the coverage/tracing wrappers.
+/native-ut-trace-events.json
+/rtf-ut.profdata
+/quickjs_cache/

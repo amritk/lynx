@@ -1,0 +1,13 @@
+# Keeps this executable's own definitions out of its dynamic symbol table.
+#
+# The executable links its own copies of cpp-httplib and BoringSSL, which
+# liblynx.so also contains. The build does not hide symbol visibility, so
+# without this the executable's copies would be exported and would interpose
+# liblynx.so's calls to its own copies, leaving BoringSSL's internal state
+# (once-guards, the per-thread error queue) split between the two.
+#
+# Undefined references are unaffected, so symbols imported from liblynx.so
+# still resolve normally.
+{
+  local: *;
+};

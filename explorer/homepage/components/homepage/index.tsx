@@ -191,7 +191,8 @@ export default function HomePage(props: HomePageProps) {
   const sessionRowHeight = (url: string) => 40 + sessionURLLineCount(url) * 18;
   const isDesktop =
     lynx.__globalProps.platform === 'macos' ||
-    lynx.__globalProps.platform === 'windows';
+    lynx.__globalProps.platform === 'windows' ||
+    lynx.__globalProps.platform === 'linux';
   const sparklingMode =
     sparklingSupported && preferredContainer === 'sparkling';
 
